@@ -42,8 +42,16 @@ compare_reference_metric <- function(actual,
                                      tolerance,
                                      min_correlation,
                                      min_near_exact_rate) {
+  actual <- copy(as.data.table(actual))
+  reference <- copy(as.data.table(reference))
   require_columns(actual, c(keys, metric), paste0(label, "_actual"))
   require_columns(reference, c(keys, metric), paste0(label, "_reference"))
+  for (key in keys) {
+    if (!inherits(actual[[key]], c("Date", "IDate")) && !inherits(reference[[key]], c("Date", "IDate"))) {
+      actual[, (key) := as.character(get(key))]
+      reference[, (key) := as.character(get(key))]
+    }
+  }
 
   cmp <- merge(
     actual[, c(keys, metric), with = FALSE],
