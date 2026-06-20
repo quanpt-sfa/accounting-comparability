@@ -4,6 +4,18 @@ library(data.table)
 source(file.path("R", "00_helpers.R"))
 source(file.path("R", "03_build_firm_pairs.R"))
 source(file.path("R", "04_compute_comparability.R"))
+source(file.path("R", "05_validate_against_verdi.R"))
+
+test_that("date parsing distinguishes supported formats and rejects serial dates", {
+  diag_path <- tempfile(fileext = ".csv")
+  expect_equal(as_idate(as.IDate("2020-12-31"), "idate", diag_path), as.IDate("2020-12-31"))
+  expect_equal(as_idate(as.Date("2020-12-31"), "date", diag_path), as.IDate("2020-12-31"))
+  expect_equal(as_idate(20201231, "numeric_yyyymmdd", diag_path), as.IDate("2020-12-31"))
+  expect_equal(as_idate("20201231", "character_yyyymmdd", diag_path), as.IDate("2020-12-31"))
+  expect_equal(as_idate("2020-12-31", "character_iso", diag_path), as.IDate("2020-12-31"))
+  expect_error(as_idate(44196, "unsupported_serial", diag_path), "Invalid or suspicious dates")
+  expect_true(file.exists(diag_path))
+})
 
 test_that("rolling-window date construction keeps the 16-quarter DKV window", {
   end_date <- as.IDate("2020-12-31")
@@ -18,6 +30,21 @@ test_that("rolling-window date construction keeps the 16-quarter DKV window", {
   kept <- quarters[begin_date <= quarters & quarters <= end_date]
   expect_equal(length(kept), 16L)
   expect_equal(min(kept), as.IDate("2017-03-31"))
+})
+
+test_that("rolling-window diagnostics flag duplicate and irregular quarters", {
+  windows <- data.table(
+    gvkey1 = "A",
+    datadate1 = as.IDate("2020-12-31"),
+    fqenddt = as.IDate(c("2019-03-31", "2019-03-31", "2019-09-30")),
+    dnibe = c(1, 2, 3),
+    bhr = c(0.1, 0.2, 0.3)
+  )
+  diag <- build_window_diagnostics(windows)
+  expect_equal(diag$duplicate_fqenddt_rows, 1L)
+  expect_true(diag$irregular_quarter_spacing)
+  expect_true(diag$missing_fiscal_quarter_sequence)
+  expect_false(diag$window_count_ok)
 })
 
 test_that("same-industry firm-pair generation excludes self-pairs and keeps direction", {
@@ -78,4 +105,11 @@ test_that("firm-pair-year scores aggregate to top-peer and industry firm-year me
   expect_equal(out$m4_acctcomp, -2.5)
   expect_equal(out$m10_acctcomp, -5.5)
   expect_equal(out$ind_acctcomp, -6.5)
+})
+
+test_that("replication mode fails when reference files are missing", {
+  expect_error(
+    validate_against_verdi(mode = "replication", reference_pair_path = NULL, reference_firm_year_path = NULL),
+    "reference_pair_path"
+  )
 })

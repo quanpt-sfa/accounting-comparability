@@ -24,14 +24,63 @@ require_columns <- function(dt, cols, data_name = deparse(substitute(dt))) {
   invisible(TRUE)
 }
 
-as_idate <- function(x) {
-  if (inherits(x, "IDate")) return(x)
-  if (inherits(x, "Date")) return(as.IDate(x))
-  if (is.numeric(x)) {
-    sx <- sprintf("%08.0f", x)
-    return(as.IDate(sx, format = "%Y%m%d"))
+as_idate <- function(x,
+                     field_name = deparse(substitute(x)),
+                     diagnostics_path = file.path("reports", "date_diagnostics.csv"),
+                     min_date = as.IDate("1900-01-01"),
+                     max_date = as.IDate("2100-12-31"),
+                     fail_on_invalid = TRUE) {
+  ensure_dir(dirname(diagnostics_path))
+  original <- x
+  parser <- rep(NA_character_, length(x))
+  parsed <- rep(as.IDate(NA), length(x))
+
+  if (inherits(x, "IDate")) {
+    parsed <- x
+    parser[] <- "IDate"
+  } else if (inherits(x, "Date")) {
+    parsed <- as.IDate(x)
+    parser[] <- "Date"
+  } else if (is.numeric(x)) {
+    is_missing <- is.na(x)
+    is_yyyymmdd <- !is_missing & is.finite(x) & x == floor(x) & nchar(sprintf("%.0f", x)) == 8L
+    parser[is_missing] <- "missing_numeric"
+    parser[is_yyyymmdd] <- "numeric_YYYYMMDD"
+    parser[!is_missing & !is_yyyymmdd] <- "unsupported_numeric_serial_or_non_YYYYMMDD"
+    parsed[is_yyyymmdd] <- as.IDate(sprintf("%08.0f", x[is_yyyymmdd]), format = "%Y%m%d")
+  } else if (is.character(x)) {
+    sx <- trimws(x)
+    is_missing <- is.na(sx) | sx == ""
+    is_yyyymmdd <- !is_missing & grepl("^\\d{8}$", sx)
+    is_iso <- !is_missing & grepl("^\\d{4}-\\d{2}-\\d{2}$", sx)
+    parser[is_missing] <- "missing_character"
+    parser[is_yyyymmdd] <- "character_YYYYMMDD"
+    parser[is_iso] <- "character_ISO_YYYY_MM_DD"
+    parser[!is_missing & !is_yyyymmdd & !is_iso] <- "unsupported_character_date"
+    parsed[is_yyyymmdd] <- as.IDate(sx[is_yyyymmdd], format = "%Y%m%d")
+    parsed[is_iso] <- as.IDate(sx[is_iso])
+  } else {
+    parser[] <- sprintf("unsupported_type_%s", paste(class(x), collapse = "_"))
   }
-  as.IDate(x)
+
+  invalid <- !is.na(original) & is.na(parsed)
+  suspicious <- !is.na(parsed) & (parsed < min_date | parsed > max_date)
+  if (any(invalid | suspicious)) {
+    diag <- data.table(
+      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      field = field_name,
+      row = which(invalid | suspicious),
+      original_value = as.character(original[invalid | suspicious]),
+      parser = parser[invalid | suspicious],
+      parsed_date = as.character(parsed[invalid | suspicious]),
+      issue = fifelse(invalid[invalid | suspicious], "invalid_or_unsupported", "outside_plausible_range")
+    )
+    fwrite(diag, diagnostics_path, append = file.exists(diagnostics_path))
+  }
+  if (fail_on_invalid && any(invalid | suspicious)) {
+    stop(sprintf("Invalid or suspicious dates detected in '%s'; see %s", field_name, diagnostics_path), call. = FALSE)
+  }
+  parsed
 }
 
 month_begin_shift <- function(date, months) {
@@ -135,6 +184,44 @@ holding_company_flag <- function(conm) {
   firm_name <- toupper(ifelse(is.na(conm), "", conm))
   tokens <- c("HOLDINGS", "HOLDING", "HLDGS", "HLDG", "GROUP", "GRP", "ADR", "-ADR", "-LP")
   Reduce(`|`, lapply(tokens, function(tok) grepl(sprintf("\\b%s\\b", tok), firm_name)))
+}
+
+quarter_index <- function(date) {
+  d <- as.IDate(date)
+  data.table::year(d) * 4L + ((data.table::month(d) - 1L) %/% 3L) + 1L
+}
+
+build_window_diagnostics <- function(windows) {
+  require_columns(windows, c("gvkey1", "datadate1", "fqenddt", "dnibe", "bhr"), "windows")
+  d <- copy(windows)
+  d[, valid_obs := !is.na(dnibe) & !is.na(bhr)]
+  d_valid <- d[valid_obs == TRUE]
+  if (!nrow(d_valid)) {
+    return(data.table())
+  }
+  d_valid[, q_index := quarter_index(fqenddt)]
+  d_valid[
+    ,
+    {
+      uq <- sort(unique(q_index))
+      gaps <- diff(uq)
+      expected_n <- if (length(uq)) max(uq) - min(uq) + 1L else 0L
+      .(
+        n_valid_obs = .N,
+        n_distinct_fqenddt = uniqueN(fqenddt),
+        duplicate_fqenddt_rows = .N - uniqueN(fqenddt),
+        irregular_quarter_spacing = length(gaps) > 0L && any(gaps != 1L),
+        missing_fiscal_quarter_sequence = expected_n > uniqueN(fqenddt),
+        expected_quarters_between_min_max = expected_n,
+        min_fqenddt = min(fqenddt),
+        max_fqenddt = max(fqenddt)
+      )
+    },
+    by = .(gvkey1, datadate1)
+  ][
+    ,
+    window_count_ok := n_valid_obs >= 14L & n_valid_obs <= 16L
+  ][]
 }
 
 ols_intercept_slope <- function(y, x) {

@@ -1,6 +1,9 @@
 source(file.path("R", "00_helpers.R"))
 
-prepare_inputs <- function(input_dir = "data_raw", begyear = 1981L, endyear = 2009L) {
+prepare_inputs <- function(input_dir = "data_raw",
+                           begyear = 1981L,
+                           endyear = 2009L,
+                           exclude_holding_companies = TRUE) {
   link <- read_named_input("ccmxpf_linktable", input_dir)
   funda <- read_named_input("funda", input_dir)
   fundq <- read_named_input("fundq", input_dir)
@@ -12,10 +15,14 @@ prepare_inputs <- function(input_dir = "data_raw", begyear = 1981L, endyear = 20
   require_columns(msf, c("permno", "date", "prc", "shrout", "ret"), "msf")
 
   setDT(link); setDT(funda); setDT(fundq); setDT(msf)
-  link[, `:=`(linkdt = as_idate(linkdt), linkenddt = as_idate(linkenddt), permno = lpermno)]
-  funda[, datadate := as_idate(datadate)]
-  fundq[, datadate := as_idate(datadate)]
-  msf[, date := as_idate(date)]
+  link[, `:=`(
+    linkdt = as_idate(linkdt, "ccmxpf_linktable.linkdt"),
+    linkenddt = as_idate(linkenddt, "ccmxpf_linktable.linkenddt"),
+    permno = lpermno
+  )]
+  funda[, datadate := as_idate(datadate, "funda.datadate")]
+  fundq[, datadate := as_idate(datadate, "fundq.datadate")]
+  msf[, date := as_idate(date, "msf.date")]
 
   link <- link[
     linktype %chin% c("LU", "LC", "LD", "LN", "LO", "LS", "LX") &
@@ -53,8 +60,19 @@ prepare_inputs <- function(input_dir = "data_raw", begyear = 1981L, endyear = 20
   setorder(temp, gvkey, datadate, fqenddt)
 
   temp[, holding_co := holding_company_flag(conm)]
-  append_diagnostic("step1", "holding_company_rows", temp[holding_co == TRUE, .N])
-  temp <- temp[holding_co != TRUE]
+  excluded_holding <- temp[holding_co == TRUE]
+  if (nrow(excluded_holding)) {
+    ensure_dir("reports")
+    fwrite(excluded_holding, file.path("reports", "excluded_holding_company_rows.csv"))
+  } else {
+    ensure_dir("reports")
+    fwrite(data.table(note = "No rows matched the SAS holding-company exclusion tokens."), file.path("reports", "excluded_holding_company_rows.csv"))
+  }
+  append_diagnostic("step1", "holding_company_rows", nrow(excluded_holding))
+  append_diagnostic("step1", "exclude_holding_companies", exclude_holding_companies)
+  if (isTRUE(exclude_holding_companies)) {
+    temp <- temp[holding_co != TRUE]
+  }
   temp[, c("holding_co", "conm", "begdate") := NULL]
 
   temp[, l2fqenddt := month_end_shift(fqenddt, -3L)]
