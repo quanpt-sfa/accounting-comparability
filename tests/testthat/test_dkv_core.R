@@ -1,10 +1,26 @@
 library(testthat)
 library(data.table)
 
-source(file.path("R", "00_helpers.R"))
-source(file.path("R", "03_build_firm_pairs.R"))
-source(file.path("R", "04_compute_comparability.R"))
-source(file.path("R", "05_validate_against_verdi.R"))
+repo_root <- if (basename(getwd()) == "testthat") normalizePath(file.path("..", "..")) else getwd()
+setwd(repo_root)
+source(file.path(repo_root, "R", "00_helpers.R"))
+source(file.path(repo_root, "R", "03_build_firm_pairs.R"))
+source(file.path(repo_root, "R", "04_compute_comparability.R"))
+source(file.path(repo_root, "R", "05_validate_against_verdi.R"))
+
+cleanup_generated_outputs <- function() {
+  files <- c(
+    file.path("data_intermediate", "firm_pairs.rds"),
+    file.path("data_output", "acctcomp_firmpairyear.rds"),
+    file.path("data_output", "acctcomp_firmyear.rds"),
+    file.path("reports", "validation_summary.csv"),
+    file.path("reports", "validation_checks.csv"),
+    file.path("reports", "validation_failures.csv"),
+    file.path("reports", "hand_check_firm_pair_year_sample.rds"),
+    file.path("reports", "hand_check_firm_year_sample.rds")
+  )
+  unlink(files[file.exists(files)])
+}
 
 test_that("date parsing distinguishes supported formats and rejects serial dates", {
   diag_path <- tempfile(fileext = ".csv")
@@ -48,6 +64,9 @@ test_that("rolling-window diagnostics flag duplicate and irregular quarters", {
 })
 
 test_that("same-industry firm-pair generation excludes self-pairs and keeps direction", {
+  cleanup_generated_outputs()
+  on.exit(cleanup_generated_outputs(), add = TRUE)
+
   tmp <- tempfile(fileext = ".rds")
   coefs <- data.table(
     gvkey1 = c("A", "B", "C"),
@@ -64,6 +83,9 @@ test_that("same-industry firm-pair generation excludes self-pairs and keeps dire
 })
 
 test_that("comparability score has the SAS negative absolute-error sign convention", {
+  cleanup_generated_outputs()
+  on.exit(cleanup_generated_outputs(), add = TRUE)
+
   windows <- data.table(
     gvkey1 = rep("A", 14),
     datadate1 = rep(as.IDate("2020-12-31"), 14),
@@ -92,6 +114,9 @@ test_that("missing earnings or returns are excluded from OLS helper", {
 })
 
 test_that("firm-pair-year scores aggregate to top-peer and industry firm-year measures", {
+  cleanup_generated_outputs()
+  on.exit(cleanup_generated_outputs(), add = TRUE)
+
   pairs <- data.table(
     gvkey_i = rep("A", 12),
     datadate_i = rep(as.IDate("2020-12-31"), 12),
@@ -108,6 +133,9 @@ test_that("firm-pair-year scores aggregate to top-peer and industry firm-year me
 })
 
 test_that("replication mode fails when reference files are missing", {
+  cleanup_generated_outputs()
+  on.exit(cleanup_generated_outputs(), add = TRUE)
+
   expect_error(
     validate_against_verdi(mode = "replication", reference_pair_path = NULL, reference_firm_year_path = NULL),
     "reference_pair_path"

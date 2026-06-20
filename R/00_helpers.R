@@ -103,7 +103,7 @@ sas_round <- function(x, unit) {
 read_table_auto <- function(path) {
   ext <- tolower(tools::file_ext(path))
   if (ext == "rds") return(readRDS(path))
-  if (ext == "csv") return(fread(path))
+  if (ext == "csv") return(fread(path, keepLeadingZeros = TRUE))
   if (ext == "parquet") {
     if (!requireNamespace("arrow", quietly = TRUE)) {
       stop("Package 'arrow' is required to read parquet inputs.", call. = FALSE)

@@ -105,7 +105,7 @@ Known assumptions and unresolved ambiguities are tracked in `reports/porting_ass
 Important current points:
 
 - The holding-company, group, ADR, and LP exclusion is copied from the original SAS code and is enabled by default. Use `--exclude-holding-companies=false` only for an explicitly documented adaptation.
-- The public raw snapshot copied here contains one SAS dataset file whose exact table identity is not self-describing from the filename alone. Replication mode therefore requires explicit pair-year and firm-year reference paths.
+- The public raw snapshot copied here contains one SAS dataset file, `Verdi_2011_JN_BenefitsFinancial_DATA.sas7bdat`. Inspection shows it is the firm-year reference output. It can validate `acctcomp_firmyear`; direct firm-pair-year validation still requires a separate pair-year reference file.
 - SAS date special missing values `.B` and `.E` are represented as open-ended link ranges when they arrive as missing dates in R.
 - Percentile and rank trimming are implemented transparently but should be checked against reference outputs in replication mode.
 
@@ -130,3 +130,7 @@ Rscript tests/testthat.R
 ```
 
 The tests cover date parsing, rolling-window diagnostics, same-industry pair construction, score sign convention, top-peer aggregation, and replication-mode validation failure for missing references.
+
+The repository also includes `tests/fixtures/verdi_firmyear_reference_sample.csv`, a small CSV fixture extracted from the bundled Verdi firm-year SAS dataset. These tests check the firm-year reference schema, known values, validation overlap, near-exact rates, and reference column mapping without requiring `haven`. If `haven` is installed, an additional test reads the full bundled `.sas7bdat` and checks its row count and year range.
+
+For the 2013 SAS extension, `tests/fixtures/verdi_2013_firmpair_reference_sample.csv` and `tests/fixtures/verdi_2013_firmyear_reference_sample.csv` are sampled from the 2013 pair-year and firm-year reference outputs. They exercise the replication validation gate with both required reference files and explicitly check that the terminal output year is 2013, even though the SAS2013 input macro uses `endyear = 2014`. The full pair-year `.sas7bdat` is intentionally not tracked because it is too large for normal GitHub storage; place it at `data_raw/acctcomp_firmpairyear_2013.sas7bdat` locally when direct full-reference checks are needed.
